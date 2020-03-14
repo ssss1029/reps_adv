@@ -148,7 +148,7 @@ def test():
             data, target = data.cuda(), target.cuda()
 
             # forward
-            output, _ = net(data)
+            output = net(data)
             loss = F.cross_entropy(output, target)
 
             # accuracy
