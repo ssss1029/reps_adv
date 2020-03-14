@@ -11,7 +11,7 @@ import torchvision.datasets as dset
 import torch.nn.functional as F
 from tqdm import tqdm
 from models.allconv import AllConvNet
-import attacks.attacks as attacks
+import attacks.attacks_percept as attacks
 
 parser = argparse.ArgumentParser(description='Trains a CIFAR Classifier',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -112,7 +112,7 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1,  # since lr_lambda computes multiplicative factor
         1e-6 / args.learning_rate))
 
-adversary = attacks.PGD(epsilon=8./255, num_steps=10, step_size=2./255).cuda()
+adversary = attacks.PGD(epsilon=8./255, num_steps=3, step_size=2./255).cuda()
 
 def train():
     net.train()  # enter train mode

@@ -1,4 +1,4 @@
 
-checkpoints/*.pth
+checkpoints/**/*.pt
 
 **/__pycache__/**
