@@ -11,15 +11,14 @@ import torchvision.datasets as dset
 import torch.nn.functional as F
 from tqdm import tqdm
 from models.allconv import AllConvNet
-from models.wrn_prime import WideResNet
 import attacks
 
 parser = argparse.ArgumentParser(description='Trains a CIFAR Classifier',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
                     help='Choose between CIFAR-10, CIFAR-100.')
-parser.add_argument('--model', '-m', type=str, default='wrn',
-                    choices=['allconv', 'wrn'], help='Choose architecture.')
+parser.add_argument('--model', '-m', type=str, default='allconv',
+                    choices=['allconv'], help='Choose architecture.')
 # Optimization options
 parser.add_argument('--epochs', '-e', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--learning_rate', '-lr', type=float, default=0.1, help='The initial learning rate.')
@@ -27,21 +26,26 @@ parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch siz
 parser.add_argument('--test_bs', type=int, default=200)
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument('--decay', '-d', type=float, default=0.0005, help='Weight decay (L2 penalty).')
-# WRN Architecture
-parser.add_argument('--layers', default=40, type=int, help='total number of layers')
-parser.add_argument('--widen-factor', default=2, type=int, help='widen factor')
-parser.add_argument('--droprate', default=0.0, type=float, help='dropout probability')
 # Checkpoints
-parser.add_argument('--save', '-s', type=str, default='./snapshots/rot_five', help='Folder to save checkpoints.')
-parser.add_argument('--load', '-l', type=str, default='', help='Checkpoint path to resume / test.')
+parser.add_argument('--save', '-s', type=str, default='./checkpoints/TEMP', help='Folder to save checkpoints.')
 parser.add_argument('--test', '-t', action='store_true', help='Test only flag.')
 # Acceleration
-parser.add_argument('--ngpu', type=int, default=2, help='0 = CPU.')
 parser.add_argument('--prefetch', type=int, default=4, help='Pre-fetching threads.')
 args = parser.parse_args()
 
 state = {k: v for k, v in args._get_kwargs()}
 print(state)
+
+if os.path.exists(args.save):
+    resp = None
+    while resp.lower() not in {'y', 'n'}:
+        resp = input("Save directory {0} exits. Continue? [Y/n]: ".format(args.save))
+        if resp.lower() == 'y':
+            break
+        elif resp.lower() == 'n':
+            exit(1)
+        else:
+            pass
 
 torch.manual_seed(1)
 np.random.seed(1)
@@ -49,18 +53,27 @@ np.random.seed(1)
 # # mean and standard deviation of channels of CIFAR-10 images
 # mean = [x / 255 for x in [125.3, 123.0, 113.9]]
 # std = [x / 255 for x in [63.0, 62.1, 66.7]]
+normalize = trn.Normalize((0.5, 0.5, 0.5),(0.5, 0.5, 0.5))
 
-train_transform = trn.Compose([trn.RandomHorizontalFlip(), trn.RandomCrop(32, padding=4),
-                               trn.ToTensor()])
-test_transform = trn.Compose([trn.ToTensor()])
+train_transform = trn.Compose([
+    trn.RandomHorizontalFlip(), 
+    trn.RandomCrop(32, padding=4),
+    trn.ToTensor(),
+    normalize
+])
+
+test_transform = trn.Compose([
+    trn.ToTensor(),
+    normalize
+])
 
 if args.dataset == 'cifar10':
-    train_data = dset.CIFAR10('~/datasets/cifarpy', train=True, transform=train_transform)
-    test_data = dset.CIFAR10('~/datasets/cifarpy', train=False, transform=test_transform)
+    train_data = dset.CIFAR10('/data/sauravkadavath/cifar10-dataset/', train=True, transform=train_transform)
+    test_data = dset.CIFAR10('/data/sauravkadavath/cifar10-dataset/', train=False, transform=test_transform)
     num_classes = 10
 else:
-    train_data = dset.CIFAR100('~/datasets/cifarpy', train=True, transform=train_transform)
-    test_data = dset.CIFAR100('~/datasets/cifarpy', train=False, transform=test_transform)
+    train_data = dset.CIFAR100('/data/sauravkadavath/cifar10-dataset/', train=True, transform=train_transform)
+    test_data = dset.CIFAR100('/data/sauravkadavath/cifar10-dataset/', train=False, transform=test_transform)
     num_classes = 100
 
 
@@ -73,33 +86,11 @@ test_loader = torch.utils.data.DataLoader(
 
 # Create model
 if args.model == 'allconv':
-    net = AllConvNet(num_classes)
-else:
-    net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-
-net.rot_pred = nn.Linear(128, 4)
+    net = AllConvNet(num_classes).cuda()
+# else:
+#     net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
 
 start_epoch = 0
-
-# Restore model if desired
-if args.load != '':
-    for i in range(1000 - 1, -1, -1):
-        model_name = os.path.join(args.load, args.dataset + args.model +
-                                  '_baseline_epoch_' + str(i) + '.pt')
-        if os.path.isfile(model_name):
-            net.load_state_dict(torch.load(model_name))
-            print('Model restored! Epoch:', i)
-            start_epoch = i + 1
-            break
-    if start_epoch == 0:
-        assert False, "could not resume"
-
-if args.ngpu > 1:
-    net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
-
-if args.ngpu > 0:
-    net.cuda()
-    torch.cuda.manual_seed(1)
 
 cudnn.benchmark = True  # fire on all cylinders
 
@@ -121,36 +112,24 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1,  # since lr_lambda computes multiplicative factor
         1e-6 / args.learning_rate))
 
-
 adversary = attacks.PGD(epsilon=8./255, num_steps=10, step_size=2./255).cuda()
-
-# /////////////// Training ///////////////
-
 
 def train():
     net.train()  # enter train mode
     loss_avg = 0.0
-    for bx, by in train_loader:
-        curr_batch_size = bx.size(0)
-        by_prime = torch.cat((torch.zeros(bx.size(0)), torch.ones(bx.size(0)),
-                              2*torch.ones(bx.size(0)), 3*torch.ones(bx.size(0))), 0).long()
-        bx = bx.numpy()
-        # use torch.rot90 in later versions of pytorch
-        bx = np.concatenate((bx, bx, np.rot90(bx, 1, axes=(2, 3)),
-                             np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
-        bx = torch.FloatTensor(bx)
-        bx, by, by_prime = bx.cuda(), by.cuda(), by_prime.cuda()
+    for bx, by in tqdm(train_loader):
 
-        adv_bx = adversary(net, bx, by, by_prime, curr_batch_size)
+        bx, by, = bx.cuda(), by.cuda()
+
+        adv_bx = adversary(net, bx, by)
 
         # forward
-        logits, pen = net(adv_bx * 2 - 1)
+        logits = net(adv_bx)
 
         # backward
         scheduler.step()
         optimizer.zero_grad()
-        loss = F.cross_entropy(logits[:curr_batch_size], by)
-        loss += 0.5 * F.cross_entropy(net.module.rot_pred(pen[curr_batch_size:]), by_prime)
+        loss = F.cross_entropy(logits, by)
         loss.backward()
         optimizer.step()
 
@@ -169,7 +148,7 @@ def test():
             data, target = data.cuda(), target.cuda()
 
             # forward
-            output, _ = net(data * 2 - 1)
+            output, _ = net(data)
             loss = F.cross_entropy(output, target)
 
             # accuracy
