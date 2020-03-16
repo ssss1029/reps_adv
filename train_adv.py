@@ -123,6 +123,8 @@ def train():
 
         adv_bx = adversary(net, bx, by)
 
+        # print(torch.max(bx), torch.min(bx), torch.mean(bx))
+
         # forward
         logits = net(adv_bx)
 

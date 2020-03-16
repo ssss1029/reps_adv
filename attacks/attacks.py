@@ -51,6 +51,7 @@ class PGD(nn.Module):
         :param by: true labels
         :return: perturbed batch of images
         """
+
         adv_bx = bx.detach()
         adv_bx += torch.zeros_like(adv_bx).uniform_(-self.epsilon, self.epsilon)
 
@@ -62,7 +63,7 @@ class PGD(nn.Module):
             grad = torch.autograd.grad(loss, adv_bx, only_inputs=True)[0]
 
             adv_bx = adv_bx.detach() + self.step_size * torch.sign(grad.detach())
-            adv_bx = torch.min(torch.max(adv_bx, bx - self.epsilon), bx + self.epsilon).clamp(0, 1)
+            adv_bx = torch.min(torch.max(adv_bx, bx - self.epsilon), bx + self.epsilon)
 
         return adv_bx
 

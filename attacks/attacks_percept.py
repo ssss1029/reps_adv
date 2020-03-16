@@ -66,7 +66,9 @@ class PGD(nn.Module):
 
                 print("loss_percept = ", loss_percept.item(), "loss_ce = ", loss_ce.item())
 
-                loss = loss_ce + loss_percept
+                # loss = loss_ce + loss_percept
+                # loss = loss_ce
+                loss = loss_percept
 
             grad = torch.autograd.grad(loss, adv_bx, only_inputs=True)[0]
 
